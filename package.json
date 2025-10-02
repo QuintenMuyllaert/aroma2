@@ -1,0 +1,15 @@
+{
+  "name": "aroma",
+  "version": "1.0.0",
+  "description": "Aroma is a Lua-based WebAssembly graphics runtime with a simple API for creating interactive 2D graphics. Code is executed by a Lua 5.2 interpreter compiled to WebAssembly, with the runtime implemented in C and rendering through WebGL via Emscripten. Compatible with Love2D code via an alias.",
+  "license": "MIT",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "esbuild": "^0.25.10"
+  }
+}

@@ -1,5 +1,8 @@
 OUT_DIR := dist
-TARGET := $(OUT_DIR)/index.html
+TARGET_JS := js/wasm-aroma.js
+WASM_OUT := $(TARGET_JS:.js=.wasm)
+DATA_OUT := $(TARGET_JS:.js=.data)
+HTML_OUT := $(OUT_DIR)/index.html
 EMSCRIPTEN_ROOT := /usr/lib/emscripten
 EMCC := $(EMSCRIPTEN_ROOT)/emcc
 EMRUN := $(EMSCRIPTEN_ROOT)/emrun
@@ -16,24 +19,41 @@ LUA_LIB := \
 SOURCES := main.c $(addprefix $(LUA_DIR)/,$(LUA_CORE) $(LUA_LIB))
 ASSETS := hi.png
 
+JS_SRCS := $(shell find js -type f -name '*.js' ! -name 'wasm-aroma.js')
+BUNDLE := $(OUT_DIR)/app.js
+
 CFLAGS := -O3 -s WASM=1 -s FULL_ES2=1 -s MIN_WEBGL_VERSION=1 -s MAX_WEBGL_VERSION=1 \
           -s ENVIRONMENT=web -s ALLOW_MEMORY_GROWTH=0 -s ASSERTIONS=0 \
-          -I$(LUA_DIR) --shell-file $(SHELL_FILE) --preload-file main.lua
+          -s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME=wasmAromaModule \
+          -s EXPORTED_RUNTIME_METHODS=ccall \
+          -I$(LUA_DIR)
 LDFLAGS :=
 
 .PHONY: all clean run
 
-all: $(TARGET)
+all: $(HTML_OUT) $(BUNDLE)
 
-$(TARGET): $(SOURCES) $(SHELL_FILE) main.lua | $(OUT_DIR)
+$(TARGET_JS): $(SOURCES) | js
 	EM_CACHE=$(EM_CACHE) $(EMCC) $(SOURCES) $(CFLAGS) $(LDFLAGS) -o $@
+
+$(BUNDLE): $(JS_SRCS) $(TARGET_JS) | $(OUT_DIR)
+	esbuild js/module-init.js --bundle --format=esm --platform=browser --outfile=$(BUNDLE)
+
+$(HTML_OUT): $(SHELL_FILE) $(BUNDLE) $(TARGET_JS)
+	cp $(SHELL_FILE) $(HTML_OUT)
+	cp $(WASM_OUT) $(OUT_DIR)/
+	@if [ -f $(DATA_OUT) ]; then cp $(DATA_OUT) $(OUT_DIR)/; fi
 	cp $(ASSETS) $(OUT_DIR)/
+
+js:
+	mkdir -p js
 
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
 clean:
 	rm -rf $(OUT_DIR)
+	rm -f js/wasm-aroma.js js/wasm-aroma.wasm js/wasm-aroma.data
 
 run: all
-	EM_CACHE=$(EM_CACHE) $(EMRUN) $(TARGET)
+	EM_CACHE=$(EM_CACHE) $(EMRUN) $(HTML_OUT)

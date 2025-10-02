@@ -2,83 +2,106 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Spinning Triangle</title>
+  <title>Aroma WebAssembly Runtime</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #111; display: flex; align-items: center; justify-content: center; }
-    canvas { display: block; background: #111; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: #1a1a1a; color: #e0e0e0; }
+    body { display: flex; gap: 20px; padding: 20px; }
+
+    #editor-panel {
+      flex: 0 0 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    #code-editor {
+      flex: 1;
+      width: 100%;
+      padding: 12px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 13px;
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border: 1px solid #3d3d3d;
+      border-radius: 4px;
+      resize: none;
+      line-height: 1.5;
+    }
+
+    #run-button {
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      background: #5c6ac4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #run-button:hover:not(:disabled) { background: #4c5ab4; }
+    #run-button:active:not(:disabled) { background: #3c4aa4; }
+    #run-button:disabled { background: #3d3d3d; color: #888; cursor: not-allowed; }
+
+    #canvas-panel {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      border-radius: 4px;
+      border: 1px solid #3d3d3d;
+    }
+
+    canvas {
+      display: block;
+      background: #111;
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: #ffffff;
+    }
   </style>
 </head>
 <body>
-  <canvas id="canvas" width="640" height="480"></canvas>
-  <script>
-    var Module = {
-      canvas: document.getElementById('canvas')
-    };
-  </script>
-  {{{ SCRIPT }}}
-  <script>
-    (function() {
-      const store = (() => {
-        const textures = new Map();
-        let nextId = 1;
-        function create(gl, bitmap, opts) {
-          const tex = gl.createTexture();
-          gl.bindTexture(gl.TEXTURE_2D, tex);
-          const {
-            flipY = true,
-            mag = gl.NEAREST,
-            min = gl.NEAREST,
-            wrapS = gl.CLAMP_TO_EDGE,
-            wrapT = gl.CLAMP_TO_EDGE
-          } = opts || {};
-          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flipY);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, mag);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, min);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
-          const id = nextId++;
-          textures.set(id, { tex, width: bitmap.width, height: bitmap.height });
-          return { id, width: bitmap.width, height: bitmap.height };
-        }
-        return {
-          async load(url, opts) {
-            const gl = Module.ctx;
-            if (!gl) throw new Error('WebGL context not ready yet');
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`Failed to fetch ${url}`);
-            const blob = await response.blob();
-            const bitmap = await createImageBitmap(blob);
-            return create(gl, bitmap, opts);
-          },
-          get(id) { return textures.get(id); },
-          release(id) {
-            const entry = textures.get(id);
-            if (!entry) return;
-            Module.ctx.deleteTexture(entry.tex);
-            textures.delete(id);
-          }
-        };
-      })();
+  <div id="editor-panel">
+    <h1>Aroma Code Editor</h1>
+    <textarea id="code-editor">local image
 
-      Module.textureStore = store;
-      Module.bindTexture = function(id) {
-        const entry = store.get(id);
-        if (!entry) return;
-        Module.ctx.bindTexture(Module.ctx.TEXTURE_2D, entry.tex);
-      };
-      Module.requestTextureLoad = function(ptr, path) {
-        Module.textureStore.load(path).then(function(result) {
-          Module._love_image_loaded(ptr, result.id, result.width, result.height);
-        }).catch(function(err) {
-          console.error('Failed to load texture', path, err);
-          Module._love_image_loaded(ptr, 0, 0, 0);
-        });
-      };
-      Module.releaseTexture = function(id) {
-        store.release(id);
-      };
-    })();
-  </script>
+function aroma.load()
+    aroma.graphics.setBackgroundColor(1, 1, 1)
+    image = aroma.graphics.newImage("hi.png")
+end
+
+function aroma.update(dt)
+    aroma.angle = (aroma.angle or 0) + dt
+end
+
+function aroma.draw()
+    aroma.graphics.setColor(1, 1, 1)
+    if image then
+        aroma.graphics.draw(image, 180, 140, 0, 1, 1, image:getWidth() / 2, image:getHeight() / 2)
+    end
+
+    aroma.graphics.setColor(1, 0.75, 0.8)
+    aroma.graphics.push()
+    aroma.graphics.translate(400, 300)
+    aroma.graphics.rotate(aroma.angle or 0)
+    aroma.graphics.polygon('fill', -50, -50, 50, -50, 0, 50)
+    aroma.graphics.pop()
+end</textarea>
+    <button id="run-button" disabled>Run Code</button>
+  </div>
+
+  <div id="canvas-panel">
+    <canvas id="canvas" width="800" height="600"></canvas>
+  </div>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>

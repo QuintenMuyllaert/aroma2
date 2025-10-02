@@ -21,11 +21,11 @@ typedef struct {
     int width;
     int height;
     int loaded;
-} LoveImage;
+} AromaImage;
 
 typedef struct {
     lua_State *L;
-    int love_ref;
+    int aroma_ref;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE gl_context;
     GLuint program;
     GLuint vbo;
@@ -123,14 +123,13 @@ static void mat3_scale(Mat3 *m, float sx, float sy) {
 }
 
 EM_JS(void, js_request_texture_load, (uintptr_t image_ptr, const char *path), {
-  var ptr = image_ptr;
-  var url = UTF8ToString(path);
-  Module.textureStore.load(url).then(function(result) {
-    Module._love_image_loaded(ptr, result.id, result.width, result.height);
-  }).catch(function(err) {
-    console.error('Failed to load image', url, err);
-    Module._love_image_loaded(ptr, 0, 0, 0);
-  });
+  if (Module.requestTextureLoad) {
+    const url = UTF8ToString(path);
+    Module.requestTextureLoad(image_ptr, url);
+  } else {
+    console.error('Module.requestTextureLoad is not defined');
+    Module._aroma_image_loaded(image_ptr, 0, 0, 0);
+  }
 });
 
 EM_JS(void, js_bind_texture, (int texture_id), {
@@ -141,8 +140,8 @@ EM_JS(void, js_release_texture, (int texture_id), {
   Module.releaseTexture(texture_id);
 });
 
-EMSCRIPTEN_KEEPALIVE void love_image_loaded(uintptr_t image_ptr, int texture_id, int width, int height) {
-    LoveImage *img = (LoveImage *)image_ptr;
+EMSCRIPTEN_KEEPALIVE void aroma_image_loaded(uintptr_t image_ptr, int texture_id, int width, int height) {
+    AromaImage *img = (AromaImage *)image_ptr;
     if (!img) {
         return;
     }
@@ -176,8 +175,8 @@ static Mat3 *current_matrix(void) {
     return &g_state.matrix_stack[g_state.stack_top];
 }
 
-static LoveImage *check_image(lua_State *L, int idx) {
-    return (LoveImage *)luaL_checkudata(L, idx, "love.image");
+static AromaImage *check_image(lua_State *L, int idx) {
+    return (AromaImage *)luaL_checkudata(L, idx, "aroma.image");
 }
 
 static int l_graphics_setBackgroundColor(lua_State *L) {
@@ -266,19 +265,19 @@ static int l_graphics_polygon(lua_State *L) {
 static int l_graphics_newImage(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
 
-    LoveImage *img = (LoveImage *)lua_newuserdata(L, sizeof(LoveImage));
-    memset(img, 0, sizeof(LoveImage));
+    AromaImage *img = (AromaImage *)lua_newuserdata(L, sizeof(AromaImage));
+    memset(img, 0, sizeof(AromaImage));
     img->loaded = 0;
 
     js_request_texture_load((uintptr_t)img, path);
 
-    luaL_getmetatable(L, "love.image");
+    luaL_getmetatable(L, "aroma.image");
     lua_setmetatable(L, -2);
     return 1;
 }
 
 static int l_graphics_draw(lua_State *L) {
-    LoveImage *img = check_image(L, 1);
+    AromaImage *img = check_image(L, 1);
     float x = (float)luaL_optnumber(L, 2, 0.0);
     float y = (float)luaL_optnumber(L, 3, 0.0);
     float r = (float)luaL_optnumber(L, 4, 0.0);
@@ -347,19 +346,19 @@ static int l_graphics_draw(lua_State *L) {
 }
 
 static int l_image_getWidth(lua_State *L) {
-    LoveImage *img = check_image(L, 1);
+    AromaImage *img = check_image(L, 1);
     lua_pushinteger(L, img->width);
     return 1;
 }
 
 static int l_image_getHeight(lua_State *L) {
-    LoveImage *img = check_image(L, 1);
+    AromaImage *img = check_image(L, 1);
     lua_pushinteger(L, img->height);
     return 1;
 }
 
 static int l_image_gc(lua_State *L) {
-    LoveImage *img = check_image(L, 1);
+    AromaImage *img = check_image(L, 1);
     if (img->texture_id) {
         js_release_texture(img->texture_id);
         img->texture_id = 0;
@@ -370,8 +369,8 @@ static int l_image_gc(lua_State *L) {
 
 
 
-static void register_love_api(lua_State *L) {
-    if (luaL_newmetatable(L, "love.image")) {
+static void register_aroma_api(lua_State *L) {
+    if (luaL_newmetatable(L, "aroma.image")) {
         lua_pushcfunction(L, l_image_gc);
         lua_setfield(L, -2, "__gc");
 
@@ -384,8 +383,8 @@ static void register_love_api(lua_State *L) {
     }
     lua_pop(L, 1);
 
-    lua_newtable(L);                /* love */
-    lua_newtable(L);                /* love.graphics */
+    lua_newtable(L);                /* aroma */
+    lua_newtable(L);                /* aroma.graphics */
 
     lua_pushcfunction(L, l_graphics_setBackgroundColor);
     lua_setfield(L, -2, "setBackgroundColor");
@@ -414,7 +413,11 @@ static void register_love_api(lua_State *L) {
     lua_pushcfunction(L, l_graphics_draw);
     lua_setfield(L, -2, "draw");
 
-    lua_setfield(L, -2, "graphics"); /* love.graphics = table */
+    lua_setfield(L, -2, "graphics"); /* aroma.graphics = table */
+    lua_setglobal(L, "aroma");
+
+    /* Create "love" alias for compatibility */
+    lua_getglobal(L, "aroma");
     lua_setglobal(L, "love");
 }
 
@@ -425,9 +428,9 @@ static void report_lua_error(lua_State *L) {
     lua_pop(L, 1);
 }
 
-static void call_love_function(const char *name, int nargs, int nresults) {
+static void call_aroma_function(const char *name, int nargs, int nresults) {
     lua_State *L = g_state.L;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, g_state.love_ref); /* love table */
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_state.aroma_ref); /* aroma table */
     lua_getfield(L, -1, name);
     if (lua_isfunction(L, -1)) {
         if (lua_pcall(L, nargs, nresults, 0) != LUA_OK) {
@@ -435,15 +438,16 @@ static void call_love_function(const char *name, int nargs, int nresults) {
         }
     } else {
         lua_pop(L, 1 + nargs); /* remove non-function and possible args */
-        lua_pop(L, 1); /* love table */
+        lua_pop(L, 1); /* aroma table */
         return;
     }
-    lua_pop(L, 1); /* pop love table */
+    lua_pop(L, 1); /* pop aroma table */
 }
 
-static void call_love_update(float dt) {
+static void call_aroma_update(float dt) {
     lua_State *L = g_state.L;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, g_state.love_ref);
+    if (!L || g_state.aroma_ref == LUA_NOREF) return;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_state.aroma_ref);
     lua_getfield(L, -1, "update");
     if (lua_isfunction(L, -1)) {
         lua_pushnumber(L, dt);
@@ -456,9 +460,10 @@ static void call_love_update(float dt) {
     lua_pop(L, 1);
 }
 
-static void call_love_draw(void) {
+static void call_aroma_draw(void) {
     lua_State *L = g_state.L;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, g_state.love_ref);
+    if (!L || g_state.aroma_ref == LUA_NOREF) return;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_state.aroma_ref);
     lua_getfield(L, -1, "draw");
     if (lua_isfunction(L, -1)) {
         if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -582,13 +587,47 @@ static void main_loop(void *userdata) {
     float dt = (float)((now - g_state.last_time) * 0.001);
     g_state.last_time = now;
 
-    call_love_update(dt);
+    call_aroma_update(dt);
 
     glClearColor(g_state.bg_color[0], g_state.bg_color[1], g_state.bg_color[2], g_state.bg_color[3]);
     glClear(GL_COLOR_BUFFER_BIT);
 
     reset_graphics_state();
-    call_love_draw();
+    call_aroma_draw();
+}
+
+EMSCRIPTEN_KEEPALIVE int run_lua_code(const char *code) {
+    if (g_state.L) {
+        lua_close(g_state.L);
+        g_state.L = NULL;
+        g_state.aroma_ref = LUA_NOREF;
+    }
+
+    g_state.L = luaL_newstate();
+    if (!g_state.L) {
+        fprintf(stderr, "Failed to create Lua state\n");
+        return 1;
+    }
+
+    luaL_openlibs(g_state.L);
+    register_aroma_api(g_state.L);
+
+    if (luaL_loadstring(g_state.L, code) != LUA_OK) {
+        report_lua_error(g_state.L);
+        return 1;
+    }
+
+    if (lua_pcall(g_state.L, 0, 0, 0) != LUA_OK) {
+        report_lua_error(g_state.L);
+        return 1;
+    }
+
+    lua_getglobal(g_state.L, "aroma");
+    g_state.aroma_ref = luaL_ref(g_state.L, LUA_REGISTRYINDEX);
+
+    call_aroma_function("load", 0, 0);
+
+    return 0;
 }
 
 int main(void) {
@@ -598,6 +637,7 @@ int main(void) {
     g_state.draw_color[1] = 1.0f;
     g_state.draw_color[2] = 1.0f;
     g_state.draw_color[3] = 1.0f;
+    g_state.aroma_ref = LUA_NOREF;
 
     if (!init_webgl()) {
         return 1;
@@ -608,25 +648,6 @@ int main(void) {
     }
 
     glGenBuffers(1, &g_state.vbo);
-
-    g_state.L = luaL_newstate();
-    if (!g_state.L) {
-        fprintf(stderr, "Failed to create Lua state\n");
-        return 1;
-    }
-
-    luaL_openlibs(g_state.L);
-    register_love_api(g_state.L);
-
-    if (luaL_dofile(g_state.L, "main.lua") != LUA_OK) {
-        report_lua_error(g_state.L);
-        return 1;
-    }
-
-    lua_getglobal(g_state.L, "love");
-    g_state.love_ref = luaL_ref(g_state.L, LUA_REGISTRYINDEX);
-
-    call_love_function("load", 0, 0);
 
     g_state.last_time = emscripten_get_now();
     emscripten_set_main_loop_arg(main_loop, NULL, 0, 1);
