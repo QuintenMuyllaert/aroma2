@@ -1,23 +1,24 @@
-
+local image
 
 function love.load()
-    love.graphics.setBackgroundColor(1, 1, 1) -- Set background color to white
+    love.graphics.setBackgroundColor(1, 1, 1)
+    image = love.graphics.newImage("hi.png")
 end
 
 function love.update(dt)
-    -- Increment the angle of rotation
-    if not love.angle then
-        love.angle = 0
-    end
-    love.angle = love.angle + dt
+    love.angle = (love.angle or 0) + dt
 end
 
 function love.draw()
-    love.graphics.setColor(1, 0.75, 0.8) -- Set color to pink
-    love.graphics.push() -- Start a new matrix stack
-    love.graphics.translate(400, 300) -- Move the origin to the center of the screen
-    love.graphics.rotate(love.angle) -- Rotate the coordinate system
-    love.graphics.polygon('fill', -50, -50, 50, -50, 0, 50) -- Draw a triangle
-    love.graphics.pop() -- Restore the original matrix stack
-end
+    love.graphics.setColor(1, 1, 1)
+    if image then
+        love.graphics.draw(image, 180, 140, 0, 1, 1, image:getWidth() / 2, image:getHeight() / 2)
+    end
 
+    love.graphics.setColor(1, 0.75, 0.8)
+    love.graphics.push()
+    love.graphics.translate(400, 300)
+    love.graphics.rotate(love.angle or 0)
+    love.graphics.polygon('fill', -50, -50, 50, -50, 0, 50)
+    love.graphics.pop()
+end

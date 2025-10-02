@@ -14,6 +14,7 @@ LUA_LIB := \
 	lauxlib.c lbaselib.c lbitlib.c lcorolib.c ldblib.c liolib.c lmathlib.c \
 	loslib.c lstrlib.c ltablib.c loadlib.c linit.c
 SOURCES := main.c $(addprefix $(LUA_DIR)/,$(LUA_CORE) $(LUA_LIB))
+ASSETS := hi.png
 
 CFLAGS := -O3 -s WASM=1 -s FULL_ES2=1 -s MIN_WEBGL_VERSION=1 -s MAX_WEBGL_VERSION=1 \
           -s ENVIRONMENT=web -s ALLOW_MEMORY_GROWTH=0 -s ASSERTIONS=0 \
@@ -26,6 +27,7 @@ all: $(TARGET)
 
 $(TARGET): $(SOURCES) $(SHELL_FILE) main.lua | $(OUT_DIR)
 	EM_CACHE=$(EM_CACHE) $(EMCC) $(SOURCES) $(CFLAGS) $(LDFLAGS) -o $@
+	cp $(ASSETS) $(OUT_DIR)/
 
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)

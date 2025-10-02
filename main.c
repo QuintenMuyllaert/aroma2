@@ -5,6 +5,7 @@
 #include <lauxlib.h>
 #include <lualib.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,13 @@ typedef struct {
 } Mat3;
 
 typedef struct {
+    int texture_id;
+    int width;
+    int height;
+    int loaded;
+} LoveImage;
+
+typedef struct {
     lua_State *L;
     int love_ref;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE gl_context;
@@ -24,6 +32,8 @@ typedef struct {
     GLint transform_loc;
     GLint projection_loc;
     GLint color_loc;
+    GLint use_texture_loc;
+    GLint sampler_loc;
     float projection[9];
     float bg_color[4];
     float draw_color[4];
@@ -38,19 +48,26 @@ static EngineState g_state;
 
 static const char *vertex_shader_source =
     "attribute vec2 aPosition;\n"
+    "attribute vec2 aTexCoord;\n"
     "uniform mat3 uTransform;\n"
     "uniform mat3 uProjection;\n"
+    "varying vec2 vTexCoord;\n"
     "void main() {\n"
     "  vec3 world = uTransform * vec3(aPosition, 1.0);\n"
     "  vec3 clip = uProjection * world;\n"
     "  gl_Position = vec4(clip.xy, 0.0, 1.0);\n"
+    "  vTexCoord = aTexCoord;\n"
     "}\n";
 
 static const char *fragment_shader_source =
     "precision mediump float;\n"
     "uniform vec4 uColor;\n"
+    "uniform sampler2D uTexture;\n"
+    "uniform int uUseTexture;\n"
+    "varying vec2 vTexCoord;\n"
     "void main() {\n"
-    "  gl_FragColor = uColor;\n"
+    "  vec4 tex = uUseTexture == 1 ? texture2D(uTexture, vTexCoord) : vec4(1.0);\n"
+    "  gl_FragColor = tex * uColor;\n"
     "}\n";
 
 static void mat3_identity(Mat3 *m) {
@@ -97,6 +114,44 @@ static void mat3_rotate(Mat3 *m, float angle) {
     mat3_multiply(m, m, &r);
 }
 
+static void mat3_scale(Mat3 *m, float sx, float sy) {
+    Mat3 s;
+    mat3_identity(&s);
+    s.m[0] = sx;
+    s.m[4] = sy;
+    mat3_multiply(m, m, &s);
+}
+
+EM_JS(void, js_request_texture_load, (uintptr_t image_ptr, const char *path), {
+  var ptr = image_ptr;
+  var url = UTF8ToString(path);
+  Module.textureStore.load(url).then(function(result) {
+    Module._love_image_loaded(ptr, result.id, result.width, result.height);
+  }).catch(function(err) {
+    console.error('Failed to load image', url, err);
+    Module._love_image_loaded(ptr, 0, 0, 0);
+  });
+});
+
+EM_JS(void, js_bind_texture, (int texture_id), {
+  Module.bindTexture(texture_id);
+});
+
+EM_JS(void, js_release_texture, (int texture_id), {
+  Module.releaseTexture(texture_id);
+});
+
+EMSCRIPTEN_KEEPALIVE void love_image_loaded(uintptr_t image_ptr, int texture_id, int width, int height) {
+    LoveImage *img = (LoveImage *)image_ptr;
+    if (!img) {
+        return;
+    }
+    img->texture_id = texture_id;
+    img->width = width;
+    img->height = height;
+    img->loaded = texture_id != 0;
+}
+
 static void parse_color(lua_State *L, int idx, float out[4]) {
     int count = lua_gettop(L) - idx + 1;
     double r = luaL_checknumber(L, idx + 0);
@@ -119,6 +174,10 @@ static void parse_color(lua_State *L, int idx, float out[4]) {
 
 static Mat3 *current_matrix(void) {
     return &g_state.matrix_stack[g_state.stack_top];
+}
+
+static LoveImage *check_image(lua_State *L, int idx) {
+    return (LoveImage *)luaL_checkudata(L, idx, "love.image");
 }
 
 static int l_graphics_setBackgroundColor(lua_State *L) {
@@ -187,18 +246,144 @@ static int l_graphics_polygon(lua_State *L) {
     glUniformMatrix3fv(g_state.transform_loc, 1, GL_FALSE, current_matrix()->m);
     glUniformMatrix3fv(g_state.projection_loc, 1, GL_FALSE, g_state.projection);
     glUniform4fv(g_state.color_loc, 1, g_state.draw_color);
+    if (g_state.use_texture_loc >= 0) {
+        glUniform1i(g_state.use_texture_loc, 0);
+    }
+    glDisableVertexAttribArray(1);
+    glVertexAttrib2f(1, 0.0f, 0.0f);
 
     glBindBuffer(GL_ARRAY_BUFFER, g_state.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * points * 2, coords, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (const void *)0);
+
     glDrawArrays(GL_TRIANGLE_FAN, 0, points);
 
     free(coords);
     return 0;
 }
 
+static int l_graphics_newImage(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+
+    LoveImage *img = (LoveImage *)lua_newuserdata(L, sizeof(LoveImage));
+    memset(img, 0, sizeof(LoveImage));
+    img->loaded = 0;
+
+    js_request_texture_load((uintptr_t)img, path);
+
+    luaL_getmetatable(L, "love.image");
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
+static int l_graphics_draw(lua_State *L) {
+    LoveImage *img = check_image(L, 1);
+    float x = (float)luaL_optnumber(L, 2, 0.0);
+    float y = (float)luaL_optnumber(L, 3, 0.0);
+    float r = (float)luaL_optnumber(L, 4, 0.0);
+    float sx = (float)luaL_optnumber(L, 5, 1.0);
+    float sy = (float)luaL_optnumber(L, 6, sx);
+    float ox = (float)luaL_optnumber(L, 7, 0.0);
+    float oy = (float)luaL_optnumber(L, 8, 0.0);
+
+    if (!img->loaded || img->texture_id == 0) {
+        return 0;
+    }
+
+
+
+    Mat3 base;
+    mat3_copy(&base, current_matrix());
+
+    Mat3 local;
+    mat3_identity(&local);
+    mat3_translate(&local, x, y);
+    if (r != 0.0f) {
+        mat3_rotate(&local, r);
+    }
+    mat3_scale(&local, sx, sy);
+    if (ox != 0.0f || oy != 0.0f) {
+        mat3_translate(&local, -ox, -oy);
+    }
+
+    Mat3 final;
+    mat3_multiply(&final, &base, &local);
+
+    float w = (float)img->width;
+    float h = (float)img->height;
+    float vertices[] = {
+        0.0f, 0.0f, 0.0f, 0.0f,
+        w,    0.0f, 1.0f, 0.0f,
+        w,    h,    1.0f, 1.0f,
+        0.0f, h,    0.0f, 1.0f
+    };
+
+    glUseProgram(g_state.program);
+    glUniformMatrix3fv(g_state.transform_loc, 1, GL_FALSE, final.m);
+    glUniformMatrix3fv(g_state.projection_loc, 1, GL_FALSE, g_state.projection);
+    glUniform4fv(g_state.color_loc, 1, g_state.draw_color);
+    if (g_state.use_texture_loc >= 0) {
+        glUniform1i(g_state.use_texture_loc, 1);
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    js_bind_texture(img->texture_id);
+    if (g_state.sampler_loc >= 0) {
+        glUniform1i(g_state.sampler_loc, 0);
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, g_state.vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (const void *)0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (const void *)(sizeof(float) * 2));
+
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+    glDisableVertexAttribArray(1);
+    return 0;
+}
+
+static int l_image_getWidth(lua_State *L) {
+    LoveImage *img = check_image(L, 1);
+    lua_pushinteger(L, img->width);
+    return 1;
+}
+
+static int l_image_getHeight(lua_State *L) {
+    LoveImage *img = check_image(L, 1);
+    lua_pushinteger(L, img->height);
+    return 1;
+}
+
+static int l_image_gc(lua_State *L) {
+    LoveImage *img = check_image(L, 1);
+    if (img->texture_id) {
+        js_release_texture(img->texture_id);
+        img->texture_id = 0;
+    }
+    img->loaded = 0;
+    return 0;
+}
+
+
+
 static void register_love_api(lua_State *L) {
+    if (luaL_newmetatable(L, "love.image")) {
+        lua_pushcfunction(L, l_image_gc);
+        lua_setfield(L, -2, "__gc");
+
+        lua_newtable(L);
+        lua_pushcfunction(L, l_image_getWidth);
+        lua_setfield(L, -2, "getWidth");
+        lua_pushcfunction(L, l_image_getHeight);
+        lua_setfield(L, -2, "getHeight");
+        lua_setfield(L, -2, "__index");
+    }
+    lua_pop(L, 1);
+
     lua_newtable(L);                /* love */
     lua_newtable(L);                /* love.graphics */
 
@@ -223,9 +408,16 @@ static void register_love_api(lua_State *L) {
     lua_pushcfunction(L, l_graphics_polygon);
     lua_setfield(L, -2, "polygon");
 
+    lua_pushcfunction(L, l_graphics_newImage);
+    lua_setfield(L, -2, "newImage");
+
+    lua_pushcfunction(L, l_graphics_draw);
+    lua_setfield(L, -2, "draw");
+
     lua_setfield(L, -2, "graphics"); /* love.graphics = table */
     lua_setglobal(L, "love");
 }
+
 
 static void report_lua_error(lua_State *L) {
     const char *msg = lua_tostring(L, -1);
@@ -308,6 +500,7 @@ static int init_program(void) {
     glAttachShader(g_state.program, vs);
     glAttachShader(g_state.program, fs);
     glBindAttribLocation(g_state.program, 0, "aPosition");
+    glBindAttribLocation(g_state.program, 1, "aTexCoord");
     glLinkProgram(g_state.program);
 
     GLint status = GL_FALSE;
@@ -322,6 +515,16 @@ static int init_program(void) {
     g_state.transform_loc = glGetUniformLocation(g_state.program, "uTransform");
     g_state.projection_loc = glGetUniformLocation(g_state.program, "uProjection");
     g_state.color_loc = glGetUniformLocation(g_state.program, "uColor");
+    g_state.use_texture_loc = glGetUniformLocation(g_state.program, "uUseTexture");
+    g_state.sampler_loc = glGetUniformLocation(g_state.program, "uTexture");
+
+    glUseProgram(g_state.program);
+    if (g_state.sampler_loc >= 0) {
+        glUniform1i(g_state.sampler_loc, 0);
+    }
+    if (g_state.use_texture_loc >= 0) {
+        glUniform1i(g_state.use_texture_loc, 0);
+    }
 
     glDeleteShader(vs);
     glDeleteShader(fs);

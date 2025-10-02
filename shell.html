@@ -16,5 +16,69 @@
     };
   </script>
   {{{ SCRIPT }}}
+  <script>
+    (function() {
+      const store = (() => {
+        const textures = new Map();
+        let nextId = 1;
+        function create(gl, bitmap, opts) {
+          const tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          const {
+            flipY = true,
+            mag = gl.NEAREST,
+            min = gl.NEAREST,
+            wrapS = gl.CLAMP_TO_EDGE,
+            wrapT = gl.CLAMP_TO_EDGE
+          } = opts || {};
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flipY);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, mag);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, min);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+          const id = nextId++;
+          textures.set(id, { tex, width: bitmap.width, height: bitmap.height });
+          return { id, width: bitmap.width, height: bitmap.height };
+        }
+        return {
+          async load(url, opts) {
+            const gl = Module.ctx;
+            if (!gl) throw new Error('WebGL context not ready yet');
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Failed to fetch ${url}`);
+            const blob = await response.blob();
+            const bitmap = await createImageBitmap(blob);
+            return create(gl, bitmap, opts);
+          },
+          get(id) { return textures.get(id); },
+          release(id) {
+            const entry = textures.get(id);
+            if (!entry) return;
+            Module.ctx.deleteTexture(entry.tex);
+            textures.delete(id);
+          }
+        };
+      })();
+
+      Module.textureStore = store;
+      Module.bindTexture = function(id) {
+        const entry = store.get(id);
+        if (!entry) return;
+        Module.ctx.bindTexture(Module.ctx.TEXTURE_2D, entry.tex);
+      };
+      Module.requestTextureLoad = function(ptr, path) {
+        Module.textureStore.load(path).then(function(result) {
+          Module._love_image_loaded(ptr, result.id, result.width, result.height);
+        }).catch(function(err) {
+          console.error('Failed to load texture', path, err);
+          Module._love_image_loaded(ptr, 0, 0, 0);
+        });
+      };
+      Module.releaseTexture = function(id) {
+        store.release(id);
+      };
+    })();
+  </script>
 </body>
 </html>
