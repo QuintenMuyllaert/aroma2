@@ -5,7 +5,6 @@ DATA_OUT := $(TARGET_JS:.js=.data)
 HTML_OUT := $(OUT_DIR)/index.html
 EMSCRIPTEN_ROOT := /usr/lib/emscripten
 EMCC := $(EMSCRIPTEN_ROOT)/emcc
-EMRUN := $(EMSCRIPTEN_ROOT)/emrun
 EM_CACHE := $(abspath $(OUT_DIR)/.emscripten_cache)
 SHELL_FILE := shell.html
 LUA_DIR := lua-5.2/src
@@ -34,7 +33,7 @@ LDFLAGS :=
 
 all: $(HTML_OUT) $(BUNDLE)
 
-$(TARGET_JS): $(SOURCES) | js
+$(TARGET_JS): main.c | lua-5.2 js
 	EM_CACHE=$(EM_CACHE) $(EMCC) $(SOURCES) $(CFLAGS) $(LDFLAGS) -o $@
 
 $(BUNDLE): $(JS_SRCS) $(TARGET_JS) | $(OUT_DIR)
@@ -57,5 +56,7 @@ clean:
 	rm -rf $(OUT_DIR)
 	rm -f js/wasm-aroma.js js/wasm-aroma.wasm js/wasm-aroma.data
 
-run: all
-	EM_CACHE=$(EM_CACHE) $(EMRUN) $(HTML_OUT)
+lua-5.2:
+	curl -O https://www.lua.org/ftp/lua-5.2.4.tar.gz
+	tar -xzf lua-5.2.4.tar.gz
+	mv lua-5.2.4 lua-5.2
