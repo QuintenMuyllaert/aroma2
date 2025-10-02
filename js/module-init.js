@@ -8,6 +8,30 @@ if (!canvas) {
 
 const codeEditor = document.getElementById('code-editor');
 const runButton = document.getElementById('run-button');
+const exampleSelector = document.getElementById('example-selector');
+
+// Load example code from file
+async function loadExample(filename) {
+  try {
+    const response = await fetch(`examples/${filename}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch example: ${response.status}`);
+    }
+    const code = await response.text();
+    codeEditor.value = code;
+  } catch (err) {
+    console.error('Error loading example:', err);
+    codeEditor.value = '-- Failed to load example\n';
+  }
+}
+
+// Load default example on page load
+loadExample('default.lua');
+
+// Handle example selection change
+exampleSelector.addEventListener('change', (e) => {
+  loadExample(e.target.value);
+});
 
 const moduleConfig = {
   canvas,

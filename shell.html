@@ -15,6 +15,21 @@
       gap: 10px;
     }
 
+    #example-selector {
+      padding: 8px 12px;
+      font-size: 13px;
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border: 1px solid #3d3d3d;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #example-selector:focus {
+      outline: none;
+      border-color: #5c6ac4;
+    }
+
     #code-editor {
       flex: 1;
       width: 100%;
@@ -71,30 +86,10 @@
 <body>
   <div id="editor-panel">
     <h1>Aroma Code Editor</h1>
-    <textarea id="code-editor">local image
-
-function aroma.load()
-    aroma.graphics.setBackgroundColor(1, 1, 1)
-    image = aroma.graphics.newImage("hi.png")
-end
-
-function aroma.update(dt)
-    aroma.angle = (aroma.angle or 0) + dt
-end
-
-function aroma.draw()
-    aroma.graphics.setColor(1, 1, 1)
-    if image then
-        aroma.graphics.draw(image, 180, 140, 0, 1, 1, image:getWidth() / 2, image:getHeight() / 2)
-    end
-
-    aroma.graphics.setColor(1, 0.75, 0.8)
-    aroma.graphics.push()
-    aroma.graphics.translate(400, 300)
-    aroma.graphics.rotate(aroma.angle or 0)
-    aroma.graphics.polygon('fill', -50, -50, 50, -50, 0, 50)
-    aroma.graphics.pop()
-end</textarea>
+    <select id="example-selector">
+      <option value="default.lua">default.lua</option>
+    </select>
+    <textarea id="code-editor"></textarea>
     <button id="run-button" disabled>Run Code</button>
   </div>
 
