@@ -1,0 +1,7 @@
+# Build artifacts
+/dist/
+
+# Emscripten cache when built inside dist
+*.data
+*.js
+*.wasm
