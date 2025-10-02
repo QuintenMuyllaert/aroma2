@@ -38,7 +38,7 @@ $(TARGET_JS): $(SOURCES) | js
 	EM_CACHE=$(EM_CACHE) $(EMCC) $(SOURCES) $(CFLAGS) $(LDFLAGS) -o $@
 
 $(BUNDLE): $(JS_SRCS) $(TARGET_JS) | $(OUT_DIR)
-	esbuild js/module-init.js --bundle --format=esm --platform=browser --outfile=$(BUNDLE)
+	esbuild js/shell.js --bundle --format=esm --platform=browser --outfile=$(BUNDLE)
 
 $(HTML_OUT): $(SHELL_FILE) $(BUNDLE) $(TARGET_JS)
 	cp $(SHELL_FILE) $(HTML_OUT)
